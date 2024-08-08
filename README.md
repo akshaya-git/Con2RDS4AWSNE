@@ -56,17 +56,91 @@ This example shares steps on how to extract sensitive sample data from RDS and p
         rm vsock_sample_server.eif
         docker build -t vsock-sample-server -f Dockerfile.server .
         nitro-cli build-enclave —docker-uri vsock-sample-server —output-file vsock_sample_server.eif
-        nitro-cli run-enclave —eif-path vsock_sample_server.eif —cpu-count 2 —memory 6000 
-15. Send a request to the server application from Client - In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
+        nitro-cli run-enclave —eif-path vsock_sample_server.eif —cpu-count 2 —memory 6000
+    The output of this build command should show the following block
+       ```[
+              {
+                "EnclaveName": "vsock_sample_server",
+                "EnclaveID": "i-0a18f010f7a97308e-enc1912819d422fe7a",
+                "ProcessID": 742180,
+                "EnclaveCID": 16,
+                "NumberOfCPUs": 2,
+                "CPUIDs": [
+                  1,
+                  9
+                ],
+                "MemoryMiB": 6144,
+                "State": "RUNNING",
+                "Flags": "NONE",
+                "Measurements": {
+                  "HashAlgorithm": "Sha384 { ... }",
+                  "PCR0": "c3460af5a442e56c24010c2566463369bc40c901028d8b027dbc29947d28df0b1230ef5073c90863b8c2ed062aec7957",
+                  "PCR1": "4b4d5b3661b3efc12920900c80e126e4ce783c522de6c02a2a5bf7af3a2b9327b86776f188e4be1c1c404a129dbda493",
+                  "PCR2": "344b4ec003898169272c107f730b9d7baeb353d5592da049ebae9d63c9bda8ceb3b18d1d10767b472409c346112443ee"
+                }
+              }
+        ]```
+16. Send a request to the server application from Client - In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
         cd aws-nitro-enclaves-samples/vsock_sample/py
-        python3 client.py client $ENCLAVE_CID 5000
-16. Observe the output - The console on the step 12 should show the values extracted from RDS instance and teh same RDS extracted values should be visible on client terminal 
-17. Update the KMS key Policy with Instance admin role and PCR0 value of the Enclave, this will lock down the access to KMS key only to Enclave (Note the enclave has to be started in production mode for this option to work)
-        1. Add following roles as Key administrators
-            1. Ec2 instances role (In my case that was EpoxyChronicleInstanceRole)
-            2. Admin
-18. Clean the environment
-    1. Delete the Secrets Manager
+        python3 client.py client $ENCLAVECID 5000 --------- ENCLAVECID is the 2 digits id shown above in step 15 
+17. Observe the output - The console on the step 15 should show the values extracted from RDS instance and the same RDS extracted values should be visible on client terminal 
+18. Update the KMS key Policy with Instance role and PCR0 value of the Enclave, this will lock down the access to KMS key only to Enclave (Note the enclave has to be started in production mode for this option to work)
+    ```{
+            "Version": "2012-10-17",
+            "Id": "key-default-1",
+            "Statement": [
+                {
+                    "Sid": "Enable decrypt from enclave",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": "arn:aws:iam::xxxxxx:role/EC2InstanceROle"
+                    },
+                    "Action": "kms:Decrypt",
+                    "Resource": "*",
+                    "Condition": {
+                        "StringEqualsIgnoreCase": {
+                            "kms:RecipientAttestation:ImageSha384": "<add the PCR0 value of the Enclave from the build aboe>"
+                        }
+                    }
+                },
+                {
+                    "Sid": "Enable encrypt from instance",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": "arn:aws:iam::xxxxxxx:role/EC2InstanceROle"
+                    },
+                    "Action": "kms:Encrypt",
+                    "Resource": "*"
+                },
+                {
+                    "Sid": "Allow access for Key Administrators",
+                    "Effect": "Allow",
+                    "Principal": {
+                        "AWS": "arn:aws:iam::xxxxxxx:role/Admin"
+                    },
+                    "Action": [
+                        "kms:Create*",
+                        "kms:Describe*",
+                        "kms:Enable*",
+                        "kms:List*",
+                        "kms:Put*",
+                        "kms:Update*",
+                        "kms:Revoke*",
+                        "kms:Disable*",
+                        "kms:Get*",
+                        "kms:Delete*",
+                        "kms:TagResource",
+                        "kms:UntagResource",
+                        "kms:ScheduleKeyDeletion",
+                        "kms:CancelKeyDeletion",
+                        "kms:RotateKeyOnDemand"
+                    ],
+                    "Resource": "*"
+                }
+            ]
+        }```
+19. Clean the environment
+    1. Delete the Secrets Manager instance
     2. Delete the KMS key
     3. Terminate the RDS instance and
     4. Terminate the Ec2 instance
