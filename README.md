@@ -21,6 +21,16 @@ This example shares steps on how to extract sensitive sample data from RDS and p
 3. Create a MySQL RDS instance (use console to create the DB) 
     1. Note the ARN of the Database (you can optionally enable TLS on RDS database but this example does not use TLS certificate during RDS requests)
     2. Note the username / password provided when creating the RDS instances for future use
+    3. Create a table (Sample shown below for test purpose) and insert some values in to the table
+        ```
+       CREATE TABLE Persons (
+                               SSN INT,
+                               NAME VARCHAR(255),
+                               AGE INT ,
+                               ADDRESS VARCHAR (255)
+                            );
+        INSERT INTO Persons (SSN, NAME, AGE, ADDRESS) VALUES (123456789, 'joey', 25, NULL);
+       ```
 4. Install Docker and Nitro Enclave Cli on the Ec2 machine — https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html
 5. Update the Memory allocation for NitroEnclave
       sudo systemctl stop nitro-enclaves-allocator.service
@@ -58,7 +68,8 @@ This example shares steps on how to extract sensitive sample data from RDS and p
         nitro-cli build-enclave —docker-uri vsock-sample-server —output-file vsock_sample_server.eif
         nitro-cli run-enclave —eif-path vsock_sample_server.eif —cpu-count 2 —memory 6000
     The output of this build command should show the following block
-       ```[
+       ```
+       [
               {
                 "EnclaveName": "vsock_sample_server",
                 "EnclaveID": "i-0a18f010f7a97308e-enc1912819d422fe7a",
@@ -79,13 +90,15 @@ This example shares steps on how to extract sensitive sample data from RDS and p
                   "PCR2": "344b4ec003898169272c107f730b9d7baeb353d5592da049ebae9d63c9bda8ceb3b18d1d10767b472409c346112443ee"
                 }
               }
-        ]```
+        ]
+       ```
 16. Send a request to the server application from Client - In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
         cd aws-nitro-enclaves-samples/vsock_sample/py
         python3 client.py client $ENCLAVECID 5000 --------- ENCLAVECID is the 2 digits id shown above in step 15 
 17. Observe the output - The console on the step 15 should show the values extracted from RDS instance and the same RDS extracted values should be visible on client terminal 
 18. Update the KMS key Policy with Instance role and PCR0 value of the Enclave, this will lock down the access to KMS key only to Enclave (Note the enclave has to be started in production mode for this option to work)
-    ```{
+    ```
+    {
             "Version": "2012-10-17",
             "Id": "key-default-1",
             "Statement": [
@@ -138,7 +151,8 @@ This example shares steps on how to extract sensitive sample data from RDS and p
                     "Resource": "*"
                 }
             ]
-        }```
+        }
+    ```
 19. Clean the environment
     1. Delete the Secrets Manager instance
     2. Delete the KMS key
