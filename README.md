@@ -14,7 +14,7 @@ This example shares steps on how to extract sensitive sample data from RDS and p
 ![image](https://github.com/user-attachments/assets/7722cd9a-4c51-413b-9cd7-ab506aa13448)
 
 **Steps to recreate the Environment** - This Example uses Python code samples
-1. Setup your Nitro Enclave environment
+1. Setup your Nitro Enclave environment using Amazon Linux 2023
     1. Create a EC2 machine with Nitro Enclave enabled and 50gb of storage (This can be done from console or using Cli command)
 2. Create a KMS Key (use console - You can provide your own key material if needed but for this test we will use AWS generated CMK)
     1. Note the ARN of the key for future use
@@ -31,36 +31,60 @@ This example shares steps on how to extract sensitive sample data from RDS and p
                             );
         INSERT INTO Persons (SSN, NAME, AGE, ADDRESS) VALUES (123456789, 'joey', 25, NULL);
        ```
-4. Install Docker and Nitro Enclave Cli on the Ec2 machine — https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html
-5. Update the Memory allocation for NitroEnclave
+4. nstall Mysql and other Python packages required for a later time 
+    ```
+        sudo yum install mysql
+        sudo yum install python3-pip
+        sudo yum update -y 
+        sudo  yum install -y \
+            sudo \
+            python3 \
+            python3-pip \
+            gcc \
+            gcc-c++ \
+            make \
+            openssl-devel \
+            libffi-devel \
+            wget \
+            iproute \
+            tar \
+            && yum clean all
+        pip install boto3
+        pip install pybase64
+        pip install requests
+        pip install python_http_client
+        pip install mysql-connector-python
+    ```
+5. Install Docker and Nitro Enclave Cli on the Ec2 machine — https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html
+6. Update the Memory allocation for NitroEnclave
       sudo systemctl stop nitro-enclaves-allocator.service
       sudo vi /etc/nitro_enclaves/allocator.yaml
       update the --- memory_mib: 8000 and save the file
       sudo systemctl start nitro-enclaves-allocator.service && sudo systemctl enable nitro-enclaves-allocator.service
-6. Install the sample vsock Hello world application - Connect to ec2 instance - Install git and clone the git repo - 
+7. Install the sample vsock Hello world application - Connect to ec2 instance - Install git and clone the git repo - 
       git clone https://github.com/aws/aws-nitro-enclaves-samples.git
       cd aws-nitro-enclaves-samples/vsock_sample/py
-7. Prepare the Secrets Manager with encrypted RDS Credentials
+8. Prepare the Secrets Manager with encrypted RDS Credentials
     1. Encrypt your RDS username and Password using the sample Script  
     2. Create a new Secret Manager using the encrypted username and password provided by the script above - Use AWS console to create a new secret manager entry
     3. Create a new Policy for the Instance Role to be able to access the secret manager
     4. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
-8. Deploy kmstool-enclave-cli - https://github.com/aws/aws-nitro-enclaves-sdk-c/tree/main/bin/kmstool-enclave-cli
+9. Deploy kmstool-enclave-cli - https://github.com/aws/aws-nitro-enclaves-sdk-c/tree/main/bin/kmstool-enclave-cli
     1. Move the kms_enclave_cli file and libnsm.so file under aws-nitro-enclaves-samples/vsock_sample/py folder for the Dockerfile.server to access them during the build process
     2. This tool allows Enclave to connect to KMS for decryption of RDS credentials
-9. Install the traffic forwarder to forward request from inside Enclave to RDS to query the data - https://github.com/aws-samples/aws-nitro-enclaves-workshop/blob/8e48f98f6923aff725f37ca7099b16da86251aca/resources/code/my-first-enclave/secure-local-channel/traffic_forwarder.py
+10. Install the traffic forwarder to forward request from inside Enclave to RDS to query the data - https://github.com/aws-samples/aws-nitro-enclaves-workshop/blob/8e48f98f6923aff725f37ca7099b16da86251aca/resources/code/my-first-enclave/secure-local-channel/traffic_forwarder.py
     1. Copy the forwarder code and paste it in a file under aws-nitro-enclaves-samples/vsock_sample/py folder - retain the name of the file as traffic_forwarder.py 
     2. Update the Dockerfile and run.sh as captured in steps below
-10. Update the client.py and server.py code 
-11. Install and build the vsock Proxy - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md
+11. Update the client.py and server.py code 
+12. Install and build the vsock Proxy - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md
     1. Update the /etc/nitro_enclaves/vsock-proxy.yaml file and make the following entry at the top of the file (follow the indentation pattern as it is set for other entires)
         1. -- {address: <RDS Endpoint ARN>, port: 3306}
     2. Start the 2 vsock proxies proxies in background as follows
         1. vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
         2. vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
-12. Update the Dockerfile.server 
-13. Update the run.sh script 
-14. Build the enclave - Build the Docker image, build the enclave image file, build the enclave, start the Enclave and connect to the console - Note to run the enclave in production mode remove the —debug-mode —attach-console parameter
+13. Update the Dockerfile.server 
+14. Update the run.sh script 
+15. Build the enclave - Build the Docker image, build the enclave image file, build the enclave, start the Enclave and connect to the console - Note to run the enclave in production mode remove the —debug-mode —attach-console parameter
         nitro-cli terminate-enclave —all
         docker rmi vsock-sample-server:latest
         rm vsock_sample_server.eif
