@@ -23,13 +23,17 @@ This example shares steps on how to extract sensitive sample data from RDS and p
     2. Note the username / password provided when creating the RDS instances for future use
 4. Install Docker and Nitro Enclave Cli on the Ec2 machine — https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html
 5. Update the Memory allocation for NitroEnclave
+      ```
       sudo systemctl stop nitro-enclaves-allocator.service
       sudo vi /etc/nitro_enclaves/allocator.yaml
       update the --- memory_mib: 8000 and save the file
       sudo systemctl start nitro-enclaves-allocator.service && sudo systemctl enable nitro-enclaves-allocator.service
+      ```
 6. Install the sample vsock Hello world application - Connect to ec2 instance - Install git and clone the git repo - 
+      ```
       git clone https://github.com/aws/aws-nitro-enclaves-samples.git
       cd aws-nitro-enclaves-samples/vsock_sample/py
+      ```
 7. Prepare the Secrets Manager with encrypted RDS Credentials
     1. Encrypt your RDS username and Password using the sample Script  
     2. Create a new Secret Manager using the encrypted username and password provided by the script above - Use AWS console to create a new secret manager entry
@@ -40,16 +44,19 @@ This example shares steps on how to extract sensitive sample data from RDS and p
     2. This tool allows Enclave to connect to KMS for decryption of RDS credentials
 9. Install the traffic forwarder to forward request from inside Enclave to RDS to query the data - https://github.com/aws-samples/aws-nitro-enclaves-workshop/blob/8e48f98f6923aff725f37ca7099b16da86251aca/resources/code/my-first-enclave/secure-local-channel/traffic_forwarder.py
     1. Copy the forwarder code and paste it in a file under aws-nitro-enclaves-samples/vsock_sample/py folder - retain the name of the file as traffic_forwarder.py 
-    2. Update the Dockerfile and run.sh as captured in steps below
-10. Update the client.py and server.py code 
+10. Update the client.py and server.py code (Under src folder)
 11. Install and build the vsock Proxy - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md
     1. Update the /etc/nitro_enclaves/vsock-proxy.yaml file and make the following entry at the top of the file (follow the indentation pattern as it is set for other entires)
-        1. -- {address: <RDS Endpoint ARN>, port: 3306}
-    2. Start the 2 vsock proxies proxies in background as follows
-        1. vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
-        2. vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
-12. Update the Dockerfile.server 
-13. Update the run.sh script 
+       ```
+       -- {address: <RDS Endpoint ARN>, port: 3306}
+       ```
+    3. Start the 2 vsock proxies proxies in background as follows
+       ```
+       vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
+       vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
+       ```
+12. Update the Dockerfile.server (Under src folder)
+13. Update the run.sh script (Under src folder)
 14. Build the enclave - Build the Docker image, build the enclave image file, build the enclave, start the Enclave and connect to the console - Note to run the enclave in production mode remove the —debug-mode —attach-console parameter
         nitro-cli terminate-enclave —all
         docker rmi vsock-sample-server:latest
@@ -79,12 +86,15 @@ This example shares steps on how to extract sensitive sample data from RDS and p
                   "PCR2": "344b4ec003898169272c107f730b9d7baeb353d5592da049ebae9d63c9bda8ceb3b18d1d10767b472409c346112443ee"
                 }
               }
-        ]```
-16. Send a request to the server application from Client - In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
-        cd aws-nitro-enclaves-samples/vsock_sample/py
-        python3 client.py client $ENCLAVECID 5000 --------- ENCLAVECID is the 2 digits id shown above in step 15 
-17. Observe the output - The console on the step 15 should show the values extracted from RDS instance and the same RDS extracted values should be visible on client terminal 
-18. Update the KMS key Policy with Instance role and PCR0 value of the Enclave, this will lock down the access to KMS key only to Enclave (Note the enclave has to be started in production mode for this option to work)
+        ]
+       ```
+15. Send a request to the server application from Client - In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
+```
+    cd aws-nitro-enclaves-samples/vsock_sample/py
+    python3 client.py client $ENCLAVECID 5000 --------- ENCLAVECID is the 2 digits id shown above in step 15
+```
+16. Observe the output - The console on the step 15 should show the values extracted from RDS instance - In real world scenarion it will send a confirmation if sensitive data is detected
+17. Update the KMS key Policy with Instance role and PCR0 value of the Enclave, this will lock down the access to KMS key only to Enclave (Note the enclave has to be started in production mode for this option to work)
     ```{
             "Version": "2012-10-17",
             "Id": "key-default-1",
@@ -138,8 +148,9 @@ This example shares steps on how to extract sensitive sample data from RDS and p
                     "Resource": "*"
                 }
             ]
-        }```
-19. Clean the environment
+        }
+    ```
+18. Clean the environment
     1. Delete the Secrets Manager instance
     2. Delete the KMS key
     3. Terminate the RDS instance and
