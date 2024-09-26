@@ -21,16 +21,49 @@ This project demonstrates how to securely extract and process sensitive sample d
 ## Steps to Recreate the Environment (Using Python)
 
 1. **Set Up Nitro Enclave Environment**:
-   - Create an EC2 instance with Nitro Enclave enabled and 50 GB of storage.
+     - Create an EC2 instance with Nitro Enclave enabled and 50 GB of storage.
 
+      ```
+        aws ec2 run-instances \
+        --image-id ami-0b5eea76982371e91 \
+        --count 1 \
+        --instance-type m5.xlarge \
+        --key-name forssh \
+        --enclave-options 'Enabled=true' \
+        --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20}}]'
+      ```
+      
 2. **Create KMS Key**:
-   - Generate a KMS Customer Managed Key (CMK) and note the ARN for later use.
+     - Generate a KMS Customer Managed Key (CMK) and note the ARN for later use.
 
 3. **Create MySQL RDS Instance**:
-   - Provision an RDS instance, noting its ARN, username, and password.
+     - Provision an RDS instance, noting its ARN, username, and password.
 
 4. **Install Required Tools on EC2**:
-   - Install Docker and Nitro Enclave CLI. [Installation Guide](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html).
+     - Install MySQl and other Python packages on the Ec2 machine
+      ```
+        sudo yum install mysql
+        sudo yum install python3-pip
+        sudo yum update -y 
+         sudo  yum install -y \
+            sudo \
+            python3 \
+            python3-pip \
+            gcc \
+            gcc-c++ \
+            make \
+            openssl-devel \
+            libffi-devel \
+            wget \
+            iproute \
+            tar \
+            && yum clean all
+        pip install boto3
+        pip install pybase64
+        pip install requests
+        pip install python_http_client
+      ```
+     - Install Docker and Nitro Enclave CLI. [Installation Guide](https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave-cli-install.html).
 
 5. **Configure Memory Allocation for Nitro Enclave**:
    ```bash
