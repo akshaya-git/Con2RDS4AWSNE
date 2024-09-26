@@ -85,13 +85,13 @@ This project demonstrates how to securely extract and process sensitive sample d
        vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
        vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
        ```
-15. **Update Dockerfile.server:**
+14. **Update Dockerfile.server:**
     1. Modify the Dockerfile.server located in the src folder.
        
-16. **Update run.sh Script:**
+15. **Update run.sh Script:**
     1. Modify the run.sh script located in the src folder.
        
-17. **Build the enclave:**
+16. **Build the enclave:**
     1. Build the Docker image, enclave image file and run the enclave.
     ```
         docker build -t vsock-sample-server -f Dockerfile.server .
@@ -123,7 +123,7 @@ This project demonstrates how to securely extract and process sensitive sample d
         ]
        ```
        
-18. **Update the KMS key Policy:**
+17. **Update the KMS key Policy:**
     1. Update the KMS key policy to restrict access based on the instance role and PCR0 value of the Enclave (ensure the enclave is started in production mode for this option to work):
     ```{
             "Version": "2012-10-17",
@@ -181,17 +181,17 @@ This project demonstrates how to securely extract and process sensitive sample d
         }
     ```
     
-19. **Send a request to the server application from Client:**
+18. **Send a request to the server application from Client:**
     1. In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
 ```
     cd aws-nitro-enclaves-samples/vsock_sample/py
     python3 client.py client $ENCLAVECID 5000 --------- Replace ENCLAVECID with the 2 digit EnclaveCID value from previous step
 ```
 
-20. **Observe the output:**
+19. **Observe the output:**
     1. The console should display the values extracted from the RDS instance. In a real-world scenario, it will send a confirmation if sensitive data is detected.
 
-21. **Clean the environment:**
+20. **Clean the environment:**
     1. Delete the Secrets Manager instance
     2. Delete the KMS key
     3. Terminate the RDS instance and
