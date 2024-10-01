@@ -57,7 +57,8 @@ class VsockListener:
                 database="[Database Name]",
                 port=3306,
                 user=decrtpeduser,
-                password=decrtpedpass
+                password=decrtpedpass,
+                ssl_ca='/us-east-1-bundle.pem'
                 )
                 # Execute a query
                 cur = cnx.cursor()

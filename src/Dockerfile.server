@@ -51,6 +51,7 @@ RUN pip3 install --user --no-cache-dir pybase64
 RUN pip3 install --user --no-cache-dir python_http_client
 RUN pip3 install --user --no-cache-dir requests
 
+COPY us-east-1-bundle.pem ./
 COPY kmstool_enclave_cli ./
 COPY libnsm.so /usr/lib64/ 
 COPY libnsm.so ./
