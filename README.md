@@ -96,18 +96,28 @@ This project demonstrates how to securely extract and process sensitive sample d
       ```
     4. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
        
-8. **Deploy kmstool-enclave-cli** 
+8.  **Donwload and Package the RDS CA certificate Bundle**
+    1. Click on the link - https://truststore.pki.rds.amazonaws.com/us-east-1/us-east-1-bundle.pem to download the ca cert bundle for us-east-1 region.
+    2. If there is a need for another region then download the respective bundle form - https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html  
+    3. Place the downloaded bundle under _aws-nitro-enclaves-samples/vsock_sample/py_ folder
+    4. To Download the rds ca cert bundle directly to Ec2 machine use the curl command
+       ```
+       curl https://truststore.pki.rds.amazonaws.com/us-east-1/us-east-1-bundle.pem
+       Copy the content from curl command and paste it in a file with same name - us-east-1-bundle.pem
+       ```
+
+9.  **Deploy kmstool-enclave-cli** 
     1. Follow the instructions in the link here - https://github.com/aws/aws-nitro-enclaves-sdk-c/tree/main/bin/kmstool-enclave-cli 
     2. Move the kms_enclave_cli file and libnsm.so file under aws-nitro-enclaves-samples/vsock_sample/py folder for the Dockerfile.server to access them during the build process
     3. This tool allows Enclave to connect to KMS for decryption of RDS credentials
        
-9. **Install the traffic forwarder:** to forward request from inside Enclave to RDS to query the data 
+10. **Install the traffic forwarder:** to forward request from inside Enclave to RDS to query the data 
     1. Copy the forwarder code from https://github.com/aws-samples/aws-nitro-enclaves-workshop/blob/8e48f98f6923aff725f37ca7099b16da86251aca/resources/code/my-first-enclave/secure-local-channel/traffic_forwarder.py and paste it in a file under aws-nitro-enclaves-samples/vsock_sample/py folder - retain the name of the file as traffic_forwarder.py
        
-10. **Update Client and Server Code:**
+11. **Update Client and Server Code:**
     1. Modify client.py and server.py in the src folder as per the requirements.
        
-11. **Install / build and Start the vsock Proxy:**
+12. **Install / build and Start the vsock Proxy:**
     1. Follow the instructions here to install and build the vsock proxy - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md
     2. Update the /etc/nitro_enclaves/vsock-proxy.yaml file with
        ```
@@ -118,13 +128,13 @@ This project demonstrates how to securely extract and process sensitive sample d
        vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
        vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
        ```
-12. **Update Dockerfile.server:**
+13. **Update Dockerfile.server:**
     1. Modify the Dockerfile.server located in the src folder.
        
-13. **Update run.sh Script:**
+14. **Update run.sh Script:**
     1. Modify the run.sh script located in the src folder.
        
-14. **Build the enclave:**
+15. **Build the enclave:**
     1. Build the Docker image, enclave image file and run the enclave.
     ```
         docker build -t vsock-sample-server -f Dockerfile.server .
@@ -156,7 +166,7 @@ This project demonstrates how to securely extract and process sensitive sample d
         ]
        ```
        
-15. **Update the KMS key Policy:**
+16. **Update the KMS key Policy:**
     1. Update the KMS key policy to restrict access based on the instance role and PCR0 value of the Enclave (ensure the enclave is started in production mode for this option to work):
     ```{
             "Version": "2012-10-17",
@@ -214,7 +224,7 @@ This project demonstrates how to securely extract and process sensitive sample d
         }
     ```
     
-16. **Send a request to the server application from Client:**
+17. **Send a request to the server application from Client:**
     1. In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
 ```
     cd aws-nitro-enclaves-samples/vsock_sample/py
