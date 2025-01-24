@@ -1,21 +1,18 @@
 # Copyright 2021 Amazon.com, Inc. or its affiliates. All Rights Reserved.
 # SPDX-License-Identifier: Apache-2.0
 
-FROM python:3.7.9-alpine3.12
+#FROM python:3.7.9-alpine3.12
 # Use Amazon Linux as the base image
-FROM amazonlinux:2
+#FROM amazonlinux:2023
+FROM public.ecr.aws/amazonlinux/amazonlinux:2023
+#ARG BASE_IMAGE=public.ecr.aws/amazonlinux/amazonlinux:2
 
-RUN amazon-linux-extras install python3
-
-#RUN mkdir /app
-#WORKDIR /app
-
-
+#FROM $BASE_IMAGE as builder
 
 # Update package list and install necessary packages
 RUN yum update -y && \
     yum install -y \
-    sudo \
+    aws-cli \
     python3 \
     python3-pip \
     gcc \
@@ -26,9 +23,13 @@ RUN yum update -y && \
     wget \
     iproute \
     tar \
+    gzip \
+    bzip2-devel \
+    openssh-server \
+    unzip \
+    sed \
+    jq \
     && yum clean all
-
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y --profile minimal --default-toolchain 1.63
 
 # Update package list and install necessary packages
 RUN yum update -y && \
@@ -39,12 +40,6 @@ RUN yum update -y && \
 # Update CA certificates
 RUN update-ca-trust
 
-# Switch to an existing non-root user
-#USER ec2-user
-
-# Update package lists and install MySQL client
-#RUN yum update -y && yum install -y mysql
-
 RUN pip3 install --user --no-cache-dir mysql-connector-python
 RUN pip3 install --user --no-cache-dir boto3
 RUN pip3 install --user --no-cache-dir pybase64
@@ -53,12 +48,12 @@ RUN pip3 install --user --no-cache-dir requests
 
 COPY us-east-1-bundle.pem ./
 COPY kmstool_enclave_cli ./
-COPY libnsm.so /usr/lib64/ 
-COPY libnsm.so ./
-COPY vsock-sample.py ./
+RUN chmod +x /kmstool_enclave_cli
+COPY libnsm.so /usr/lib64/
+RUN chmod +x /usr/lib64/
+COPY server.py ./
 COPY traffic_forwarder.py ./ 
 COPY run.sh ./
-COPY socat-1.7.4.3.tar.gz ./
 
 RUN export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:./:/usr/lib64
 
@@ -69,6 +64,3 @@ ENV PATH="./:${PATH}"
 RUN chmod +x run.sh
 
 CMD ["./run.sh"]
-
-#Start the Server process inside Enclave
-#CMD ["python3", "./vsock-sample.py", "server", "5005"]

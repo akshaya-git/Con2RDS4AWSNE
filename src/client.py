@@ -8,6 +8,7 @@ import sys
 import boto3
 import json
 import requests
+import mysql.connector
 
 # Specify your AWS region
 aws_region = 'us-east-1'  # Replace with your region
@@ -20,7 +21,6 @@ class VsockStream:
     def __init__(self, conn_timeout=30):
         self.conn_timeout = conn_timeout
 
-
     def connect(self, endpoint):
         # Connect to the remote endpoint with CID and PORT specified.
         try:
@@ -30,17 +30,50 @@ class VsockStream:
         except ConnectionResetError as e:
             print("Caught error ", str(e.strerror)," ",str(e.errno))
 
+    def is_connected(self):
+        try:
+            # Attempt to send an empty byte to check connection
+            self.sock.send(b'')
+            return True
+        except (socket.error, BrokenPipeError):
+            return False
 
-    def send_data(self, data):
-        # Send data to the remote endpoint
-        #print(str(self.sock))
-        # encode data before sending
-        self.sock.sendall(data)
-        print("Data Sent ", data)
-        # receiving responce back
-        data =  self.sock.recv(1024).decode()  # receive response
-        print('Received from server: ' + data)  # show in terminal
-        self.sock.close()
+    def send_data(self, data, endpoint):
+        try:
+            # Print socket details for debugging
+            print(str(self.sock))
+            
+            # Ensure the socket is connected before sending
+            if not self.is_connected():  # Implement an `is_connected` method
+                print("Socket is not connected. Reconnecting...")
+                self.connect(endpoint)  # Ensure `connect` method handles reconnections
+            
+            # Send data
+            self.sock.sendall(data)
+            print("Data Sent:", data)
+
+            # Receive response from server
+            resp = self.sock.recv(1024).decode()
+            print('Received from server:', resp)
+            
+            return resp  # Return response for further processing if needed
+
+        except (BrokenPipeError, ConnectionResetError) as e:
+            print(f"Connection error: {e}. Reconnecting...")
+            self.connect(endpoint)  # Attempt to reconnect
+            return self.send_data(data,endpoint)  # Retry sending data after reconnecting
+
+        except Exception as e:
+            print(f"Error in send_data: {e}")
+            return None  # Return None or handle as needed
+
+        finally:
+            # Optionally, close the socket after each operation if desired
+            # Uncomment the following line if your use case requires it
+            self.sock.close()
+            pass
+
+
 
 def get_aws_session_token():
     # URL for instance metadata
@@ -95,37 +128,81 @@ def client_handler(args):
     endpoint = (args.cid, args.port)
     #print("Endpoint Arguments ", str(args.cid), str(args.port))
     client.connect(endpoint)
-    # Send provided query and handle the response
-    # Create a Secrets Manager client
-    boclient = boto3.client('secretsmanager', region_name=aws_region)
-    try:
-        # Retrieve the secret
-        #print('Get Secret Value:')
-        get_secret_value_response = boclient.get_secret_value(SecretId="<Enter the Secret Id here>")
-        #print('Get Secret Value:',get_secret_value_response)
-    except Exception as e:
-        print(f"Error retrieving secret: {e}")
-
-    # Parse the secret value
-    secret = get_secret_value_response['SecretString']
-    secret_dict = json.loads(secret)
-    user=secret_dict['username']
-    password=secret_dict['password']
-    host="mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com"
-
-    #create a json payload to send to server with credentials of the parent
-    payload = {}
-    # Get EC2 instance metedata
-    payload["host"] = host
-    payload["user"] = user
-    payload["pass"] = password
-    # Get EC2 instance metadata
-    payload["credential"] = get_aws_session_token()
-    #print("Payload Values: --- ",payload)
-
-    # Send AWS credential to the server running in enclave
-    client.send_data(str.encode(json.dumps(payload)))
+    #Connect to SourceDb to retrieve the list of DBs to parse
     
+    print("Connecting to SourceDb")
+    #fetch the SourceDb Database connection paramters from Secrest manager
+    src_db_hostep, src_db_hostport = get_sm("sm_for_hostep_and_port_for_srcdb")
+    src_db_user, src_db_pass = get_sm("sm_for_srcdb")
+    # Database connection parameters
+    DB_HOST = src_db_hostep       
+    DB_PORT = src_db_hostport                  
+    DB_NAME = "sourcedbs"            # change the name of the mysql sourcedb if it is created with a name other than sourcedb
+    DB_USER = src_db_user          
+    DB_PASSWORD = src_db_pass
+    try:
+        # Connect to the database
+        mysqlcnx = mysql.connector.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,   
+        )
+        # Execute a query
+        cur = mysqlcnx.cursor(dictionary=True)
+        query = "select * from sourcedb"
+        cur.execute(query)
+        #sdbrow = cur.fetchall()
+        #print('Data from secomd MySql Instance: ',sdbrow)
+        payload = {} #Json to send to server
+
+        #iterate the result from sourcedb and parse through each entry to send to NitroEnclase server applictaion for processing
+        row = cur.fetchone()
+        while row:
+            print('Processing Value number - ',row)
+            dbname=row['NAME']
+            dbtype=row['type']
+            dbep=row['endpoint']
+            dbprt=row['port']
+            vsock_proxy=row['vsock_proxy']
+            secrets_mgr_ep=row['scmid']
+            encuser, encpassword = get_sm(secrets_mgr_ep) 
+            dbregion=row['region']
+            #create a json payload to send to server 
+            payload = {
+                "name": dbname,
+                "dbtype": dbtype,
+                "host": dbep,
+                "dbprt": dbprt,
+                "user": encuser,
+                "pass": encpassword,
+                "dbregion": dbregion,
+                "credential": get_aws_session_token()
+            }
+            # Send the request package with parameters to the server running in enclave
+            client.send_data(str.encode(json.dumps(payload)),endpoint)
+            row = cur.fetchone()
+        #mysqlcnx.close()
+    except BrokenPipeError:
+        print("Broken pipe error. Re-establishing connection.")
+        client.connect()  # Replace with the reconnect logic
+    except Exception as e:
+        print("Error In CLient Connect to Sourcedbs:", e)
+
+def get_sm(secrets_mgr_ep):
+        #Fetch the Secrests Manager values Create a Secrets Manager client
+        boclient = boto3.client('secretsmanager', region_name=aws_region)
+        try:
+            get_secret_value_response = boclient.get_secret_value(SecretId=secrets_mgr_ep)
+        except Exception as e:
+                print(f"Error retrieving secret: {e}")
+        # Parse the secret value
+        secret = get_secret_value_response['SecretString']
+        secret_dict = json.loads(secret)
+        user=secret_dict['username']
+        password=secret_dict['password']
+        return user, password
 
 def main():
     # Handling of input parameters

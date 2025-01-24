@@ -6,6 +6,8 @@ import sys
 import json
 import subprocess
 import mysql.connector
+import psycopg2
+from psycopg2 import sql, Error
 import base64
 
 # Specify your AWS region
@@ -32,13 +34,17 @@ class VsockListener:
             # Read 1024 bytes at a time
             try:
                 data = from_client.recv(4096).decode()
-                #print('data from Client:', data)
-                #parse the json data sent form parent
+                print('data from Client:', data)
+                #parse the json data sent frm parent
                 try:
                     data_json = json.loads(data)
                     user_enc = data_json["user"]
                     pass_enc = data_json["pass"]
                     credential = data_json["credential"]
+                    dbtype= data_json["dbtype"]
+                    dbname= data_json["name"]
+                    host= data_json["host"]
+                    port= data_json["dbprt"]
                     try:
                         decrtpeduser = kms_call(credential, user_enc)
                         decrtpedpass = kms_call(credential, pass_enc)
@@ -46,37 +52,98 @@ class VsockListener:
                         print("decrtpedpass ---- ",decrtpedpass)
                     except Exception as e:
                         msg = "exception happened calling kms binary: {}".format(e)
-                        print(msg)                        
+                        print(msg)
+                    #user=decrtpeduser,
+                    #password=decrtpedpass,
+
+                    if dbtype == "mysql":
+                        msrow = mysql_handler(host,port,dbname,decrtpeduser,decrtpedpass)
+                        from_client.send(str(msrow).encode())
+                    if dbtype == "posgres":
+                        pgrow = postgres_handler(host,port,dbname,decrtpedpass,decrtpedpass)
+                        from_client.send(str(pgrow).encode())
+                    
                 except json.JSONDecodeError as e:
                     print(f"Failed to parse JSON: {e}")
 
-                #code to connect to RDS and get the data starts  
-                # Connect to the database
-                cnx = mysql.connector.connect(
-                host="[Enter MySql Endpoint]",
-                database="[Database Name]",
-                port=3306,
-                user=decrtpeduser,
-                password=decrtpedpass,
-                ssl_ca='/us-east-1-bundle.pem'
-                )
-                # Execute a query
-                cur = cnx.cursor()
-                query = "SELECT * FROM Persons where SSN = 123456789" #Make sure the query corresponds to the table created in RDS
-                cur.execute(query)
-                row = cur.fetchall()
-                print('Data Sample from RDS: ',row)
-                
-                #
-                # ---------Add the custom logic here to process and detect the presence of sensitive data in RDs table-------
-                #
-                
-                # Send back the response                 
-                from_client.send(str(row).encode())
                 from_client.close()
                 print("Client call closed")
+
             except Exception as ex:
                 print(ex)
+
+def postgres_handler(host,port,dbname,user,password):
+    print("----@@###### ----In Server side before the call to 1st postgres DB")
+    # Database connection parameters
+    DB_HOST = host        
+    DB_PORT = port                  
+    DB_NAME = dbname            
+    DB_USER = user          
+    DB_PASSWORD = password       
+    try:
+        # Establishing the connection
+        connection = psycopg2.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD
+        )
+        #print("Connection to PostgreSQL DB successful")
+
+        # Creating a cursor to execute SQL queries
+        cursor = connection.cursor()
+
+        # Example query: Fetching PostgreSQL version
+        cursor.execute("SELECT * from Persons;")
+        pgrow = cursor.fetchall()
+        print("Data From Postgres:", pgrow)
+        return pgrow
+
+        # Close the cursor and connection
+        #cursor.close()
+        #connection.close()
+        #print("PostgreSQL connection closed")
+    except Error as e:
+        print("Error connecting to PostgreSQL:", e)
+
+
+def mysql_handler(host,port,dbname,user,password):
+    print("----@@###### ----In Server side before the call to Mysql DB")
+    # Database connection parameters
+    DB_HOST = host        
+    DB_PORT = port                  
+    DB_NAME = dbname            
+    DB_USER = user          
+    DB_PASSWORD = password 
+    print('Here 11111111111',DB_HOST,DB_PORT, DB_NAME, user, password)
+    try:
+        # Connect to the database
+        mysqlcnx = mysql.connector.connect(
+            host=DB_HOST,
+            port=DB_PORT,
+            database=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            ssl_ca='/us-east-1-bundle.pem'    
+        )
+        # Execute a query
+        print('Here 22222222222333333')
+        cur = mysqlcnx.cursor()
+        print('Here 222222222')
+        query = "SELECT * FROM Persons"
+        cur.execute(query)
+        print('Here 3333333333')
+        ms2row = cur.fetchall()
+        print('Data from secomd MySql Instance: ',ms2row)
+        return ms2row
+    # Send back the response                 
+        #from_client.send(str(row).encode())
+        #from_client.close()
+        #print("Client call closed")
+    except Error as e:
+        print("Error connecting to MySQl:", e)
+
 
 def server_handler(args):
     server = VsockListener()

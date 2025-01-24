@@ -12,12 +12,12 @@ kms_client = boto3.client('kms', region_name=aws_region)
 
 
 # KMS Key ID or ARN
-kms_key_id = 'arn:aws:kms:us-east-1:945730369875:key/f5be7153-5ec4-4852-a947-efdd4ca151fa'
+kms_key_id = 'arn:aws:kms:us-east-1:<accountid>:<KMS Key>'
 
 
 # The plaintext string you want to encrypt
-user = 'admin'
-password = 'Password'
+user = '<username>'
+password = '<password>'
 
 # Convert the plaintext string to bytes
 plaintext_user = user.encode('utf-8')
