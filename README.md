@@ -2,8 +2,20 @@
 
 ## Overview
 
-Use Case Description - Large organizations running multiple databases across various lines of business for a compliance requirement want to detect and catalogue all systems that hold and process sensitive data in a secure way. Applications that have been developed over the years need to retroactively be added to the repo. The challenge is to do this without relying on the application developers to provide this report and instead securely probe the backend database that store the sensitive data. This document shares steps on how to securely connect to the AWS managed databases and extract a subset of sensitive data from RDS managed database in a secure way from inside a Nitro Enclave. AWS Nitro Enclaves enables customers to create isolated compute environments to protect and securely process highly sensitive data such as personally identifiable information (PII)). This document also shares how to use the Attestation feature of NitroEnclave to lock down the access to KMS to decrypt the RDS access parameters which is encrypted prior to ingestion in to secrets manager. 
-**Disclaimer** - This document does not detect the presence of sensitive data but instead focuses on a secure way to connect to existing RDS databases from inside a NitroEnclave and select a subset of data from the database.
+Large organizations manage multiple databases across various lines of business, each potentially storing sensitive data such as Personally Identifiable Information (PII). A frequent requirement from compliance teams is to identify and catalog databases that hold sensitive information while ensuring secure data extraction.
+In many cases, organizations already have scripts to determine whether data is sensitive. However, accessing this data outside the application introduces security risks, as traditional extraction methods often expose data to administrators, operators, or attackers in the event of a memory dump or unauthorized access.
+To address this, there is a need for a secure and contained environment where a sample subset of sensitive data can be extracted without operator access, even in scenarios where the underlying system’s memory is compromised. Additionally, applications developed over the years must be parsed to detect the presence of such sensitive data—without solely relying on application developers to provide reports. Instead, a secure backend probing mechanism is required to directly query the database while maintaining strong security controls.
+
+**Note** - This document does not detect the presence of sensitive data but instead focuses on a secure way to connect to existing RDS databases from inside a NitroEnclave and select a subset of data from the database.
+
+## Solution Overview
+
+This guide outlines a process to securely connect to AWS-managed databases (RDS) and extract a subset of sensitive data using AWS Nitro Enclaves. AWS Nitro Enclaves provide isolated compute environments designed to securely process highly sensitive data. By leveraging Nitro Enclaves, organizations can ensure that:
+
+* Sensitive data remains inaccessible to operators and even system administrators with root / admin access.
+* Data extraction processes occur in a trusted execution environment (TEE), preventing unauthorized access—even if the underlying EC2 instance is compromised.
+* The AWS Key Management Service (KMS) attestation feature is used to restrict access to decryption keys, ensuring that only verified Nitro Enclaves can access encrypted RDS connection credentials stored in AWS Secrets Manager.
+
 
 ## Data Flow
 
@@ -33,15 +45,17 @@ Use Case Description - Large organizations running multiple databases across var
 ## Setup Ec2 environment
 
 1. Create a EC2 machine with Nitro Enclave enabled and at least 20 gb of storage This can be done from console (preferable) or Cli command below (create the ec2 machine from console or from Cli using the command below). If using the console remember to enable the enclave support for the instance
-   aws ec2 run-instances \
-    --image-id ami-0b5eea76982371e91 \
-    --count 1 \
-    --instance-type m5.xlarge \
-    --key-name forssh \
-    --enclave-options 'Enabled=true' \
-    --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20}}]'
-
-3. Connect to the Ec2 instances using ssh and Install following packages. Install Mysql and other Python packages required for a later time 
+  ```
+      aws ec2 run-instances \
+        --image-id ami-0b5eea76982371e91 \
+        --count 1 \
+        --instance-type m5.xlarge \
+        --key-name forssh \
+        --enclave-options 'Enabled=true' \
+        --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20}}]'
+```
+2. Connect to the Ec2 instances using ssh and Install following packages. Install Mysql and other Python packages required for a later time 
+   ```
         sudo yum install mysql
         sudo yum install python3-pip
         sudo yum update -y 
@@ -74,11 +88,10 @@ Use Case Description - Large organizations running multiple databases across var
         #pip3 install postgresql-devel
 
 ## Create a KMS Key
-    1. Using AWS console create a new KMS key customer managed - You can provide your own key material if needed but for this test we will use AWS generated CMK)
-    2. Note the ARN of the key to use for encrypting the username and password of the databases
+1. Using AWS console create a new KMS key customer managed - You can provide your own key material if needed but for this test we will use AWS generated CMK)
+2. Note the ARN of the key to use for encrypting the username and password of the databases
 
 ## Create Source and Target Databases in RDS
-
 1. **Source Database** - The Source Database is a mysql instance that will store relevant information of the all the target databases to scan for sensitive data and 
 2. **Target Database** - The target database are the different databases where there is data that needs to be scanned for sensitive information. This test will include 2 target databases one Mysql Instance and second a Postgres instance 
 3. First create the Create **target** Databases
@@ -93,13 +106,15 @@ Use Case Description - Large organizations running multiple databases across var
         8. Note the ARN of the Database and note the Master username and password 
     2. Similarly create another RDS Postgres database using the console - - note the Master username and password for use later
 4. Go back to the EC2 ssh terminal and connect to the MySql instance just created 
-    1. Connect to RDS mySql instance and ingest Mock data — 
+    1. Connect to RDS mySql instance and create a database —
+       ```
             mysql -h <Endpoint of the RDS MySQl DB> -u admin -p 
             mysql - ------ Enter the Password set for the DB during creation
             MySQL [(none)]> Create database <DB name> 
             use <DB name>
-            
-   2. Create a table and ingest encrypted Mock data using the commands below
+       ```
+   3. Create a table and ingest encrypted Mock data using the commands below
+      ```
              CREATE TABLE Persons (
                  SSN INT,
                  NAME VARCHAR(255),
@@ -108,13 +123,17 @@ Use Case Description - Large organizations running multiple databases across var
               );
             
             INSERT INTO Persons (SSN, NAME, AGE, ADDRESS) VALUES (123456789, 'msjoey', 25, NULL);
+      ```
       
-    4. Connect to Postgres instance — 
+    5. Connect to Postgres instance and create a databese —
+       ``` 
             psql -host =<ARN of the RDS MySQl DB> --port=5432 -username=<username of the Instance> 
             Password for user postgres: ------ Enter the Password set for the DB during creation 
             postgres[(none)]> Create database <DB name> 
             \c <DB name>
-    5. Create a table and ingest encrypted Mock data using the commands below
+       ```
+    6. Create a table and ingest Mock data using the commands below
+       ```
            CREATE TABLE Persons (
                SSN INT,
                NAME VARCHAR(255),
@@ -123,7 +142,7 @@ Use Case Description - Large organizations running multiple databases across var
             );
         
         INSERT INTO Persons (SSN, NAME, AGE, ADDRESS) VALUES (123456789, 'pgjoey', 25, NULL);
-       
+       ```
 5. Create a parameter group to enforce secure communication with MySql database
     1. Go to Parameter Group under RDS and click on create Parameter Group
     2. Provide the name as require-secure-transport
@@ -159,11 +178,14 @@ Use Case Description - Large organizations running multiple databases across var
 10. Create the Source MySQL RDS instance (use console to create the DB) - 
     1. During Source Database creation provide the database identifier as sourcedbs → This will avoid any code change else note the database identifier value provided during creation
     2. Now Connect to the SourceDb
+       ```
             mysql -h <ARN of the RDS MySQl DB> -u admin -p 
             mysql - ------ Enter the Password set for the DB during creation
             MySQL> Create database sourcedbs; 
             use sourcedbs;
+       ```
     3. Create a sourcedb table and ingest database information
+       ```
            CREATE TABLE sourcedb (
                NAME VARCHAR(255),
                type VARCHAR (255),
@@ -173,23 +195,24 @@ Use Case Description - Large organizations running multiple databases across var
                scmid VARCHAR(255),
                region VARCHAR(255)
             );
-        <replace the relevant values in the insert statement below> - leave the vsock proxy values as specified
+        <replace the relevant values in the insert statement below> - leave other values as is and update them later
         INSERT INTO sourcedb (NAME, TYPE, ENDPOINT, PORT, VSOCK_PROXY,SCMID,REGION) VALUES ('MySQl2', 'mysql', 'mstestdb3.c23cswqvzlga.us-east-1.rds.amazonaws.com', 3306, 8001, 'mstestdbsec_enc', 'us-east-1');
         INSERT INTO sourcedb (NAME, TYPE, ENDPOINT, PORT, VSOCK_PROXY,SCMID,REGION) VALUES ('PgSQl1', 'posgres', 'pgtestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com', 5432, 8002, 'sm_for_pgtestdb', 'us-east-1');
       
-    6. Create 2 new secrets for sourcedb 
-        1. Create a secret using the username and password of sourcedb, 
-            1. name the secret as - sm_for_srcdb and 
-        2. Create a secret using the endpoint and port of sourcedb, 
-            1. name the secret as - sm_for_hostep_and_port_for_srcdb
-        3. This will avoid any database connect value hardcoding in clear text in code 
-      
-    8. Using AWS Console → IAM 
-        1. Create a new IAM Policy for the Instance Role to be able to access the secrets just created above  
-        2. Click on the Create Policy on Top right hand side corner
-        3. Under Service type Secret Manager and under Actions Allowed select Read (All Read Actions)
-        4. Under the Resources specify the ARNs of all 4 Secrets created (the ones for Target Database as well as the 2 for sourcedb)
-        5. Once the policy is created the Json for the policy will look as follows (xxxxx will be the unique value system generated for the secret)
+11. Create 2 new secrets for sourcedb
+    1. Create a secret using the username and password of sourcedb, 
+       1. name the secret as - sm_for_srcdb and 
+    2. Create a secret using the endpoint and port of sourcedb, 
+       1. name the secret as - sm_for_hostep_and_port_for_srcdb
+    3. This will avoid any database connect value hardcoding in clear text in code 
+
+13. Using AWS Console → IAM
+    1. Create a new IAM Policy for the Instance Role to be able to access the secrets just created above  
+    2. Click on the Create Policy on Top right hand side corner
+    3. Under Service type Secret Manager and under Actions Allowed select Read (All Read Actions)
+    4. Under the Resources specify the ARNs of all 4 Secrets created (the ones for Target Database as well as the 2 for sourcedb)
+    5. Once the policy is created the Json for the policy will look as follows (xxxxx will be the unique value system generated for the secret)
+          ```
                {
                   "Version": "2012-10-17",
                   "Statement": [
@@ -204,9 +227,9 @@ Use Case Description - Large organizations running multiple databases across var
                           ]
                       }
                   ]
-              }  
-    10. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
-
+              }
+          ```
+    6. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
 
 <img width="1315" alt="Image (10)" src="https://github.com/user-attachments/assets/69432a01-d8ff-43a2-93c8-7ffa944d02c6" />
 
@@ -270,26 +293,32 @@ Use Case Description - Large organizations running multiple databases across var
       ```
       git clone https://github.com/aws/aws-nitro-enclaves-samples.git
       cd aws-nitro-enclaves-samples/vsock_sample/py
-      ```
+
 7. **Prepare the Secrets Manager**
-    1. Encrypt your RDS username and Password using the sample Script  (Under src folder)
-    2. Create a new Secret Manager using the encrypted username and password provided by the script - Use AWS console to create a new secret manager entry
-    3. Create a new Policy for the Instance Role to be able to access the secret manager
+   1. Encrypt your RDS username and Password using the sample Script  (Under src folder)
+   2. Create a new Secret Manager using the encrypted username and password provided by the script - Use AWS console to create a new secret manager entry
+   3. Create a new Policy for the Instance Role to be able to access the secret manager
+      
       ```
-      {
-            "Version": "2012-10-17",
-            "Statement": [
-            {
-                "Effect": "Allow",
-                "Action": "secretsmanager:GetSecretValue",
-                "Resource": "arn:aws:secretsmanager:us-east-1:xxxxxxxx:secret:xxxxxxxxxx"
-            }
-            ]
-      }
-      ```
-    4. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
+                  {
+                "Version": "2012-10-17",
+                "Statement": [
+                    {
+                        "Effect": "Allow",
+                        "Action": "secretsmanager:GetSecretValue",
+                        "Resource": [
+                            "arn:aws:secretsmanager:<region>:<account-id>:secret:mstestdbsec_enc-xxxxx",
+                            "arn:aws:secretsmanager:<region>:<account-id>:secret:sm_for_pgtestdb-xxxxx",
+                            "arn:aws:secretsmanager:<region>:<account-id>:secret:sm_for_hostep_and_port_for_srcdb-xxxxx",
+                            "arn:aws:secretsmanager:<region>:<account-id>:secret:sm_for_srcdb-xxxxx"
+                            ]
+                        }
+                    ]
+                }
+      
+    5. Attach the Policy to the IAM instance role - This allows the Instance profile to access the secrets manager
        
-8.  **Donwload and Package the RDS CA certificate Bundle**
+8.  **Download and Package the RDS CA certificate Bundle**
     1. Click on the link - https://truststore.pki.rds.amazonaws.com/us-east-1/us-east-1-bundle.pem to download the ca cert bundle for us-east-1 region.
     2. If there is a need for another region then download the respective bundle form - https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html  
     3. Place the downloaded bundle under _aws-nitro-enclaves-samples/vsock_sample/py_ folder
@@ -316,18 +345,17 @@ Use Case Description - Large organizations running multiple databases across var
        ```
        -- {address: <RDS Endpoint ARN>, port: 3306}
        ```
-    3. Start the 2 vsock proxies proxies in background as follows
+    3. Start the vsock proxies proxies in background as follows
        ```
-       vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
-       vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
+       sudo vsock-proxy 8000 mstestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
+       sudo vsock-proxy 8001 mstestdb3.c23cswqvzlga.us-east-1.rds.amazonaws.com 3306 &
+       sudo vsock-proxy 8002 pgtestdb.c23cswqvzlga.us-east-1.rds.amazonaws.com 5432 &
+       sudo vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
        ```
 13. **Update Dockerfile.server:**
-    1. Modify the Dockerfile.server located in the src folder.
+    1. Download and Modify the Dockerfile.server and run.sh script located in the src folder as needed
        
-14. **Update run.sh Script:**
-    1. Modify the run.sh script located in the src folder.
-       
-15. **Build the enclave:**
+14. **Build the enclave:**
     1. Build the Docker image, enclave image file and run the enclave.
     ```
         docker build -t vsock-sample-server -f Dockerfile.server .
@@ -359,7 +387,7 @@ Use Case Description - Large organizations running multiple databases across var
         ]
        ```
        
-16. **Update the KMS key Policy:**
+15. **Update the KMS key Policy:**
     1. Update the KMS key policy to restrict access based on the instance role and PCR0 value of the Enclave (ensure the enclave is started in production mode for this option to work):
     ```{
             "Version": "2012-10-17",
@@ -417,17 +445,17 @@ Use Case Description - Large organizations running multiple databases across var
         }
     ```
     
-17. **Send a request to the server application from Client:**
+16. **Send a request to the server application from Client:**
     1. In a separate terminal window go to the same folder and execute the following command (enclave cid is a 2 digit number seen visible after executing the enclave describe command)
 ```
     cd aws-nitro-enclaves-samples/vsock_sample/py
     python3 client.py client $ENCLAVECID 5000 --------- Replace ENCLAVECID with the 2 digit EnclaveCID value from previous step
 ```
 
-17. **Observe the output:**
+18. **Observe the output:**
     1. The console should display the values extracted from the RDS instance. In a real-world scenario, it will send a confirmation if sensitive data is detected.
 
-18. **Clean the environment:**
+19. **Clean the environment:**
     1. Delete the Secrets Manager instance
     2. Delete the KMS key
     3. Terminate the RDS instance and
