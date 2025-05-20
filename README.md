@@ -7,55 +7,57 @@ This solution leverage AWS NitroEnclave to query a sample subset of data which c
 
 **Note** - This document does not focus on detecting the presence of sensitive data. Instead, it provides a secure method for connecting to existing AWS RDS databases from inside a Nitro Enclave to extract a subset of data without exposing it to unauthorized users.
 
-## Solution Architecture
-![Image (8)](https://github.com/user-attachments/assets/d0c40028-e7b4-459f-933d-203b98d66f47)
+## About this Guide and AWS NitroEnclaves
 
-## Solution Overview
-
-This guide outlines a process to securely connect to AWS-managed databases (RDS) and extract a subset of sensitive data using AWS Nitro Enclaves. AWS Nitro Enclaves provide isolated compute environments designed to securely process highly sensitive data. By leveraging Nitro Enclaves, organizations can ensure that:
+This guide outlines a process to securely connect to AWS-managed databases (RDS) and extract a subset of sensitive data using AWS Nitro Enclaves. AWS Nitro Enclaves provide isolated compute environments designed to securely process highly sensitive data. By [leveraging Nitro Enclaves](https://aws.amazon.com/ec2/nitro/nitro-enclaves/) organizations can ensure that:
 
 * Sensitive data remains inaccessible to operators and even system administrators with root / admin access.
 * Data extraction processes occur in a trusted execution environment (TEE), preventing unauthorized access—even if the underlying EC2 instance is compromised.
 * The AWS Key Management Service (KMS) attestation feature is used to restrict access to decryption keys, ensuring that only verified Nitro Enclaves can access encrypted RDS connection credentials stored in AWS Secrets Manager.
 
+## Solution Architecture
+![Image (8)](https://github.com/user-attachments/assets/d0c40028-e7b4-459f-933d-203b98d66f47)
+
 # Services used in this example 
 
 1. **Databases**
-    1. Source Database (mysql) - The Source Database stores relevant information of the all the target databases to scan for sensitive data and 
-    2. Target Database (RDS mysql and RDS Postgres) - The target database are the various databases where there is data that needs to be scanned for sensitive information. 
+    1. Source Database (RDS mysql used for this teast) - The Source Database stores relevant information of the all the target databases to scan for sensitive data and 
+    2. Target Database (RDS mysql and postgres used for this test) - The target databases are the various databases where there is data that needs to be queried. 
 2. **KMS** - A customer managed key to encrypt the RDS database username and password
 5. **Secrets Manager** 
-    1. Admin ingests KMS encrypted (i.e. encrypted before storing in secrets manager) username and password of every target database into Secrets Manager 
+    1. Admin ingests KMS encrypted (i.e. encrypted before storing in secrets manager) username and password of every target database into Secrets Manager. Note that the default encryption of secrets manager is **NOT** used instead a KMS is key created specifically to encrypt the credentials before ingesting the credentials in secrets manager. 
 6. **IAM**
-    1. The Instance profile (Ec2 instance where Nitro Enclave is built) is given explicit permission to access the secrets created above
+    1. The Instance profile (Ec2 instance where Nitro Enclave is built) is given explicit permission to access the secrets created in secrets manager
 7. **Ec2 and NitroEnlave** 
-    1. Enclaves are fully isolated virtual machines, hardened, and highly constrained. They have no persistent storage, no interactive access, and no external networking. Communication between your instance and your enclave is done using a secure local channel. Even a root user or an admin user on the instance will not be able to access or SSH into the enclave. Nitro Enclaves use the proven isolation of the Nitro Hypervisor to further isolate the CPU and memory of the enclave from users, applications, and libraries on the parent instance. These features help isolate the enclave and your software, and significantly reduce the attack surface area.
+    1. Enclaves are fully isolated virtual machines, hardened, and highly constrained inside a an Ec2 machine. They have no persistent storage, no interactive access, and no external networking. Communication between your instance and your enclave is done using a secure local channel. Even a root user or an admin user on the instance will not be able to access or SSH into the enclave. Nitro Enclaves use the proven isolation of the Nitro Hypervisor to further isolate the CPU and memory of the enclave from users, applications, and libraries on the parent instance. These features help isolate the enclave and your software, and significantly reduce the attack surface area.
 8. **Vsock proxies for Secure communication**
     1. Implements a proxy server that runs on the parent instance and forwards vsock traffic from an enclave to a TCP endpoint. It can be run independently or as a service. - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md 
 
 
 ## Data Flow
 
-1. **Ec2 -Client Application** - 
-    1. Client Application running on the Ec2 machine queries the source database and retrieves the list of target databases that needs to queried for sample data
-    2. It then uses the secrest manager to retrive the encrypted username / password of the corresponding target database
-    3. It then send a request over vsock channel to server application inside the NitroEnclave
-    4. The request contains the encrypted access credentials along with RDS endpoint of the target database
+1. **Client Application on Parent Ec2 Machine -**
+    1. Client Application running on the Ec2 machine queries the source database and retrieves the list of target databases that needs to be queried for sample data
+    2. It then retrieves the encrypted username and password of the corresponding target database from the secrets manager
+    3. It then sends a request (over vsock channel) to server application inside the NitroEnclave for processing
+    4. The request from client Application contains the encrypted access credentials of the database, IMSDV2 acces key and token of the Ec2 machine along with RDS endpoint of the target database
 
-2. **Nitro Enclave** - 
-    1. Server application running inside NitroEnclave receives the request for target database with its endpoint and encrypted username password 
-    2. It then decrypts the username password using KMS cli (kms_enclave_cli ) packaged with the enclave  
-        1. Restricted access to KMS for decrypt request from Server application 
+2. **Server Application inside Nitro Enclave -**
+    1. Server application running inside NitroEnclave receives the request to connect and query the target database with its endpoint and encrypted username password 
+    2. It first decrypts the username and password using KMS cli (kms_enclave_cli) packaged with the enclave when it was built
+        1. Access to KMS for decrypt request from Server application is restricted only to NitroEnclave (exmaple shown below in the documentation)
             1. When NitroEnclave is created a 384 bit / 96 bytes long cryptographic attestation key containing the Platform Configuration Register (PCR) hash value is generated. PCR refers to a security feature within a Trusted Platform Module (TPM) that stores a cryptographic hash representing the current system configuration, essentially acting as a digital fingerprint of the system state at a specific point in time. 
-            2. This PCR Hash cryptographic value is added as a condition to the AWS KMS key definition for attestation and restrict the access to decrypt function of the KMS key to only the corresponding NitroEnclave.
-            3. When the Server application communicates with AWS KMS services using the kms_enclave_cli  Nitro SDK API request packages the PCR hash value for access validation. If the PCR hash value does not match the value specified in KMS condition for decrypt then the decrypt call will fail.
-    3. it then connects to the target RDS Database using traffic forwarder of respective database and queries for a sample seubset of the data from database
+            2. This PCR Hash cryptographic value is added as a condition to the AWS KMS key definition for attestation that restricts the access to decrypt function of the KMS key to only the corresponding NitroEnclave.
+            3. When the Server application communicates with AWS KMS services using the kms_enclave_cli Nitro SDK API request packages the PCR hash value for access validation. If the PCR hash value does not match the value specified in KMS condition for decrypt then the decrypt call will fail.
+    3. Once the database credentials are decrypted it then connects to the target RDS Database using traffic forwarder of respective database and queries for a sample seubset of data from the database
     4. All communication is encrypted and secure over a vsock channel and proxies configured specifically for communication with the target database
+
+---
 
 ## Steps to recreate the Environment - 
 
 ## Setup Ec2 environment
-1. Create a EC2 machine with Nitro Enclave enabled and at least 20 gb of storage This can be done from console (preferable) or Cli command below (create the ec2 machine from console or from Cli using the command below). If using the console remember to enable the enclave support for the instance
+1. Create a EC2 machine with Nitro Enclave enabled and at least 20 gb of storage This can be done from console or Cli command below. If using the console remember to enable the enclave support for the instance
   ```
       aws ec2 run-instances \
         --image-id ami-0b5eea76982371e91 \
@@ -96,6 +98,8 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
         pip3 install requests
         pip3 install python_http_client    
         pip3 install psycopg2-binary
+
+---
    
 # AWS RDS Sensitive Data Scanning with Nitro Enclaves
 
@@ -110,7 +114,7 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
 
 ### Source Database
 
-- Create a Source Database on an RDS database instance (such as MySQL) that will store relevant information of all the target databases to scan for sensitive data.
+- Create a Source Database in RDS (for this test we will use RDS MySQL) that will store relevant information of all the target databases to query for data.
 - Once the Source database is created, connect to the source database and create a table that will store relevant target database information as follows:
 
     ```
@@ -129,7 +133,7 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
 
 - Use existing RDS databases or create a MySQL and Postgres database each with some sample data that will be queried from inside the Nitro Enclave. The target databases are the databases where there is data that needs to be scanned for sensitive information.
     1. Note the username and password of the target database.
-    2. Using the KMS key created above, encrypt the username and password of each database. You can create a custom script to do this or just use the AWS CLI to encrypt the username and password:
+    2. Using the KMS key created above, encrypt the username and password of each database. You can create a custom script to do this (a sample python script provided under src folder) or just use the AWS CLI to encrypt the username and password:
 
         ```
         aws kms encrypt \
@@ -166,15 +170,13 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
         5. Attach the Policy to the IAM instance role. This allows the Instance profile to access the Secrets Manager.
 
     4. Note the port on which the database runs.
-    5. Note the endpoint ARN (Amazon Resource Name) - a unique identifier for each resource in AWS.
+    5. Note the endpoint ARN (Amazon Resource Name, a unique identifier for each resource in AWS) of the database.
     6. Note the database name and the tables to query.
-    7. Download/Install and create the vsock proxies for each of the target databases on EC2 machines. See [vsock proxy README](https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md).
-        1. Note the vsock proxy for each target database.
-    8. **Security Note:**
-        1. Enable [encryption of data at rest](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html).
-        2. Use [SSL/TLS to encrypt connection to RDS DB instance/cluster](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html).
-    9. **Populate the Source Database:**
-        1. Once the Target database and source database are created, populate the source database with relevant target database parameters. Here is a sample of what the source database will look like after it is populated:
+    7. **Security Note:**
+        1. Enable [encryption of data at rest](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html) for all the target databases.
+        2. Use [SSL/TLS to encrypt connection to RDS DB instance/cluster](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html) for secure communication with target databases.
+    10. **Populate the Source and Target Database:**
+        1. Once the Target database and source database are created, populate the source database with relevant target database parameters, if the target database is a new database then create a table and enter some sample data to query using this example. Here is a sample of what the source database will look like after it is populated:
 
             ![Sample Source DB](https://github.com/user-attachments/assets/2f796c41-0f98-41da-b6f6-3eb2f8ee554a)
 
@@ -217,7 +219,7 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
     - Move the `kmstool_enclave_cli` file and `libnsm.so` file under `aws-nitro-enclaves-samples/vsock_sample/py` folder for the `Dockerfile.server` to access them during the build process.
     - This tool allows Enclave to connect to KMS for decryption of RDS credentials.
 
-5. **Install and build the vsock Proxy**  
+5. **Download build and create the vsock Proxy for KMS and each Target Database**  
    [vsock proxy README](https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md)
 
     ```
@@ -229,16 +231,16 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
     - Update the `/etc/nitro_enclaves/vsock-proxy.yaml` file and make the following entry at the top of the file (follow the indentation pattern as it is set for other entries):
 
         ```
-        - {address: <RDS MySql Endpoint ARN>, port: 3306}
-        - {address: <RDS POstgres Endpoint ARN>, port: 5432}
-        - {address: <KMS Endpoint ARN - kms.us-east-1.amazonaws.com>, port: 443}
+        - {address: <RDS Target MySql Endpoint ARN>, port: 3306}
+        - {address: <RDS Target Postgres Endpoint ARN>, port: 5432}
+        - {address: <kms.us-east-1.amazonaws.com>, port: 443} //update the KMS ARN if other region is used
         ```
 
 6. **Start the vsock proxies in background as follows:**
 
     ```
-    sudo vsock-proxy 8000 <RDS endpoint ARN> 3306 &
-    sudo vsock-proxy 8002 <Postgres endpoint ARN> 5432 &
+    sudo vsock-proxy 8000 <RDS Target MySql endpoint ARN> 3306 &
+    sudo vsock-proxy 8002 <RDS Target Postgres endpoint ARN> 5432 &
     sudo vsock-proxy 7000 kms.us-east-1.amazonaws.com 443 &
     ```
 
@@ -255,9 +257,10 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
        For other regions, see [RDS SSL/TLS documentation](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html).
     2. Place the downloaded bundle under `aws-nitro-enclaves-samples/vsock_sample/py` folder.
     3. To download the RDS CA cert bundle directly to EC2 machine, use the `curl` command to the URL above and then copy paste the content to the file of same name as the bundle.
+    4. Note the Dockerfile.server under src folder to find the reference to this certificate bundle to be packaged during NitroEnclave build
 
 9. **Download and update the sample code from under src folder**  
-   (Modify the sample code as needed)
+   (Modify the sample code as needed to fit your environment)
     - Client application python code: `client.py`
     - Server application python code: `server.py`
     - Sample `Dockerfile.server`
@@ -265,10 +268,10 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
 
 10. **Build the enclave**  
     Build the Docker image, build the enclave image file, build the enclave, start the Enclave and connect to the console.  
-    **Note:** To run the enclave in production mode, remove the `--debug-mode --attach-console` parameter.
+    **Note:** To run the enclave in debug mode, add the `--debug-mode --attach-console` parameter to run-elcave command though that will bypass the KMS PCR has condition.
 
     ```
-    nitro-cli terminate-enclave --all # (This command will fail for the first run)
+    nitro-cli terminate-enclave --all # (This command will fail for the first run as teh enclave does not exist)
     docker rmi vsock-sample-server:latest
     rm vsock_sample_server.eif
     docker build -t vsock-sample-server -f Dockerfile.server .
