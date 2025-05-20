@@ -1,6 +1,6 @@
-# Use AWS NitroEnclave to securely Query Sample data from RDS 
+# Use AWS NitroEnclave to securely Query Sample data from RDS (Do not use this in production until it is tried and tested on Dev and QA)
 
-## Overview
+## Overview (Do not use this in production until it is tried and tested on Dev and QA)
 
 Large organizations manage multiple databases across various lines of business, each potentially storing sensitive data such as Personally Identifiable Information (PII). A frequent requirement from compliance teams is to identify and catalog databases that hold sensitive information. Additionally, applications developed over the years must be parsed to detect the presence of such sensitive data—without solely relying on application developers to provide reports on presence of sensitive data. However, accessing this data outside the application introduces security risks, as traditional extraction methods often expose data to administrators, operators, or attackers in the event of a memory dump or unauthorized access. There needs to be a secure and contained environment to query the databases while maintaining strong security controls where a sample subset of sensitive data can be extracted without operator access even in scenarios where the underlying system’s memory is compromised. 
 This solution leverage AWS NitroEnclave to query a sample subset of data which can then be parsed for a presence of sensitive data 
