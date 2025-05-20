@@ -2,8 +2,7 @@
 
 ## Overview (Do not use this in production until it is tried and tested on Dev and QA)
 
-Large organizations manage multiple databases across various lines of business, each potentially storing sensitive data such as Personally Identifiable Information (PII). A frequent requirement from compliance teams is to identify and catalog databases that hold sensitive information. Additionally, applications developed over the years must be parsed to detect the presence of such sensitive data—without solely relying on application developers to provide reports on presence of sensitive data. However, accessing this data outside the application introduces security risks, as traditional extraction methods often expose data to administrators, operators, or attackers in the event of a memory dump or unauthorized access. There needs to be a secure and contained environment to query the databases while maintaining strong security controls where a sample subset of sensitive data can be extracted without operator access even in scenarios where the underlying system’s memory is compromised. 
-This solution leverage AWS NitroEnclave to query a sample subset of data which can then be parsed for a presence of sensitive data 
+Large organizations manage multiple databases across various lines of business, each potentially storing sensitive data such as Personally Identifiable Information (PII). Compliance teams often require organizations to identify and catalog databases containing sensitive data. Additionally, legacy and modern applications may need to be analyzed for such data without relying solely on developer-provided documentation. However, accessing this data outside the application introduces security risks, as traditional extraction methods often expose data to administrators, operators, or attackers in the event of a memory dump or unauthorized access. There needs to be a secure and contained environment to query the databases while maintaining strong security controls where a sample subset of sensitive data can be extracted without operator access even in scenarios where the underlying system’s memory is compromised. This solution leverage AWS NitroEnclave to query a sample subset of data which can then be parsed for a presence of sensitive data 
 
 **Note** - This document does not focus on detecting the presence of sensitive data. Instead, it provides a secure method for connecting to existing AWS RDS databases from inside a Nitro Enclave to extract a subset of data without exposing it to unauthorized users.
 
@@ -27,11 +26,11 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
 5. **Secrets Manager** 
     1. Admin ingests KMS encrypted (i.e. encrypted before storing in secrets manager) username and password of every target database into Secrets Manager. Note that the default encryption of secrets manager is **NOT** used instead a KMS is key created specifically to encrypt the credentials before ingesting the credentials in secrets manager. 
 6. **IAM**
-    1. The Instance profile (Ec2 instance where Nitro Enclave is built) is given explicit permission to access the secrets created in secrets manager
+    1. The Instance profile (IAM role attached to the Amazon EC2 instance hosting the Nitro Enclave) is given explicit permission to access the secrets created in secrets manager
 7. **Ec2 and NitroEnlave** 
     1. Enclaves are fully isolated virtual machines, hardened, and highly constrained inside a an Ec2 machine. They have no persistent storage, no interactive access, and no external networking. Communication between your instance and your enclave is done using a secure local channel. Even a root user or an admin user on the instance will not be able to access or SSH into the enclave. Nitro Enclaves use the proven isolation of the Nitro Hypervisor to further isolate the CPU and memory of the enclave from users, applications, and libraries on the parent instance. These features help isolate the enclave and your software, and significantly reduce the attack surface area.
 8. **Vsock proxies for Secure communication**
-    1. Implements a proxy server that runs on the parent instance and forwards vsock traffic from an enclave to a TCP endpoint. It can be run independently or as a service. - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md 
+    1. A vsock proxy runs on the parent instance and securely forwards traffic between the enclave and external TCP endpoints from an enclave to a TCP endpoint. It can be run independently or as a service. - https://github.com/aws/aws-nitro-enclaves-cli/blob/main/vsock_proxy/README.md 
 
 
 ## Data Flow
@@ -67,7 +66,7 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
         --enclave-options 'Enabled=true' \
         --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":20}}]'
 ```
-2. Connect to the Ec2 instances using ssh and Install following packages. Install Mysql and other Python packages required for a later time 
+2. Connect to the Ec2 instances using ssh or AWS Session Manager  and Install following packages 
    ```
         sudo yum install mysql
         sudo yum install python3-pip
@@ -173,8 +172,8 @@ This guide outlines a process to securely connect to AWS-managed databases (RDS)
     5. Note the endpoint ARN (Amazon Resource Name, a unique identifier for each resource in AWS) of the database.
     6. Note the database name and the tables to query.
     7. **Security Note:**
-        1. Enable [encryption of data at rest](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html) for all the target databases.
-        2. Use [SSL/TLS to encrypt connection to RDS DB instance/cluster](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html) for secure communication with target databases.
+        1. Enable [encryption of data at rest for Amazon RDS](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Overview.Encryption.html) for all the target databases.
+        2. Use [SSL/TLS to encrypt connections to RDS DB instance](https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/UsingWithRDS.SSL.html) for secure communication with target databases.
     10. **Populate the Source and Target Database:**
         1. Once the Target database and source database are created, populate the source database with relevant target database parameters, if the target database is a new database then create a table and enter some sample data to query using this example. Here is a sample of what the source database will look like after it is populated:
 
