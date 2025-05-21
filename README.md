@@ -1,4 +1,4 @@
-# Use AWS NitroEnclave to securely Query Sample data from RDS (Do not use this in production until it is tried and tested on Dev and QA)
+# Use AWS NitroEnclave to securely Query Sample data from RDS 
 
 ## Overview (Do not use this in production until it is tried and tested on Dev and QA)
 
