@@ -60,7 +60,7 @@ class VsockListener:
                         msrow = mysql_handler(host,port,dbname,decrtpeduser,decrtpedpass)
                         from_client.send(str(msrow).encode())
                     if dbtype == "posgres":
-                        pgrow = postgres_handler(host,port,dbname,decrtpedpass,decrtpedpass)
+                        pgrow = postgres_handler(host,port,dbname,decrtpeduser,decrtpedpass)
                         from_client.send(str(pgrow).encode())
                     
                 except json.JSONDecodeError as e:
