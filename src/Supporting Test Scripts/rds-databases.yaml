@@ -1,0 +1,220 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for RDS databases in default VPC'
+
+Parameters:
+  MsTestDbPassword:
+    Type: String
+    NoEcho: true
+    Description: Password for mstestdb MySQL database
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9!@#$%^&*()_+=-]*'
+    ConstraintDescription: Must contain only alphanumeric characters and these special characters !@#$%^&*()_+=-
+
+  MsTestDb3Password:
+    Type: String
+    NoEcho: true
+    Description: Password for mstestdb3 MySQL database
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9!@#$%^&*()_+=-]*'
+    ConstraintDescription: Must contain only alphanumeric characters and these special characters !@#$%^&*()_+=-
+
+  PgTestDbPassword:
+    Type: String
+    NoEcho: true
+    Description: Password for pgtestdb PostgreSQL database
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9!@#$%^&*()_+=-]*'
+    ConstraintDescription: Must contain only alphanumeric characters and these special characters !@#$%^&*()_+=-
+
+  SourceDbPassword:
+    Type: String
+    NoEcho: true
+    Description: Password for sourcedb MySQL database
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: '[a-zA-Z0-9!@#$%^&*()_+=-]*'
+    ConstraintDescription: Must contain only alphanumeric characters and these special characters !@#$%^&*()_+=-
+
+Resources:
+  # Security Groups
+  RdsSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security group for RDS databases
+      GroupName: rds-security-group
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 10.0.0.0/8
+        - IpProtocol: tcp
+          FromPort: 5432
+          ToPort: 5432
+          CidrIp: 10.0.0.0/8
+
+  # Parameter Groups
+  RequireSecureTransportParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Parameter group requiring secure transport
+      Family: mysql8.0
+      Parameters:
+        require_secure_transport: "ON"
+      Tags:
+        - Key: Name
+          Value: require-secure-transport
+
+  PostgresRequireSslParamGroup:
+    Type: AWS::RDS::DBParameterGroup
+    Properties:
+      Description: Parameter group requiring SSL for PostgreSQL
+      Family: postgres16
+      Parameters:
+        ssl: "1"
+      Tags:
+        - Key: Name
+          Value: postgres-require-ssl
+
+  # KMS Key for encryption
+  RdsEncryptionKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: KMS key for RDS encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: '2012-10-17'
+        Id: key-policy
+        Statement:
+          - Sid: Enable IAM User Permissions
+            Effect: Allow
+            Principal:
+              AWS: !Sub 'arn:aws:iam::${AWS::AccountId}:root'
+            Action: 'kms:*'
+            Resource: '*'
+
+  # MySQL Test DB
+  MsTestDb:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: mstestdb
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: 8.0.40
+      MasterUsername: admin
+      MasterUserPassword: !Ref MsTestDbPassword
+      DBParameterGroupName: !Ref RequireSecureTransportParamGroup
+      VPCSecurityGroups:
+        - !GetAtt RdsSecurityGroup.GroupId
+      BackupRetentionPeriod: 1
+      CopyTagsToSnapshot: true
+      StorageType: gp2
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt RdsEncryptionKey.Arn
+      MaxAllocatedStorage: 1000
+      PubliclyAccessible: false
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+
+  # MySQL Test DB 3
+  MsTestDb3:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: mstestdb3
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: mysql
+      EngineVersion: 8.0.40
+      MasterUsername: admin
+      MasterUserPassword: !Ref MsTestDb3Password
+      DBParameterGroupName: !Ref RequireSecureTransportParamGroup
+      VPCSecurityGroups:
+        - !GetAtt RdsSecurityGroup.GroupId
+      BackupRetentionPeriod: 1
+      CopyTagsToSnapshot: true
+      StorageType: gp2
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt RdsEncryptionKey.Arn
+      MaxAllocatedStorage: 1000
+      PubliclyAccessible: false
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+
+  # PostgreSQL Test DB
+  PgTestDb:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: pgtestdb
+      AllocatedStorage: 20
+      DBInstanceClass: db.t3.micro
+      Engine: postgres
+      EngineVersion: 16.8
+      MasterUsername: postgres
+      MasterUserPassword: !Ref PgTestDbPassword
+      DBParameterGroupName: !Ref PostgresRequireSslParamGroup
+      VPCSecurityGroups:
+        - !GetAtt RdsSecurityGroup.GroupId
+      BackupRetentionPeriod: 1
+      CopyTagsToSnapshot: true
+      StorageType: gp2
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt RdsEncryptionKey.Arn
+      MaxAllocatedStorage: 1000
+      PubliclyAccessible: false
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+      EnablePerformanceInsights: true
+      PerformanceInsightsKMSKeyId: !GetAtt RdsEncryptionKey.Arn
+      PerformanceInsightsRetentionPeriod: 7
+
+  # Source DB
+  SourceDb:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: sourcedb
+      AllocatedStorage: 20
+      DBInstanceClass: db.t4g.micro
+      Engine: mysql
+      EngineVersion: 8.0.40
+      MasterUsername: admin
+      MasterUserPassword: !Ref SourceDbPassword
+      DBParameterGroupName: !Ref RequireSecureTransportParamGroup
+      VPCSecurityGroups:
+        - !GetAtt RdsSecurityGroup.GroupId
+      BackupRetentionPeriod: 1
+      CopyTagsToSnapshot: true
+      StorageType: gp2
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt RdsEncryptionKey.Arn
+      MaxAllocatedStorage: 1000
+      PubliclyAccessible: false
+      MultiAZ: false
+      AutoMinorVersionUpgrade: true
+      DeletionProtection: false
+
+Outputs:
+  MsTestDbEndpoint:
+    Description: Endpoint for mstestdb
+    Value: !GetAtt MsTestDb.Endpoint.Address
+
+  MsTestDb3Endpoint:
+    Description: Endpoint for mstestdb3
+    Value: !GetAtt MsTestDb3.Endpoint.Address
+
+  PgTestDbEndpoint:
+    Description: Endpoint for pgtestdb
+    Value: !GetAtt PgTestDb.Endpoint.Address
+
+  SourceDbEndpoint:
+    Description: Endpoint for sourcedb
+    Value: !GetAtt SourceDb.Endpoint.Address
+    
+  RdsSecurityGroupId:
+    Description: Security Group ID for RDS databases
+    Value: !GetAtt RdsSecurityGroup.GroupId
