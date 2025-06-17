@@ -1,0 +1,229 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'CloudFormation template for EC2 instance with Amazon Linux 2023, Nitro Enclaves enabled, 50GB EBS volume, and pre-allocated resources (4vCPU, 8GB memory)'
+
+Parameters:
+  InstanceType:
+    Description: EC2 instance type
+    Type: String
+    Default: m5.xlarge
+    AllowedValues:
+      - m5.xlarge
+      - m5.2xlarge
+      - m5.4xlarge
+      - c5.xlarge
+      - c5.2xlarge
+      - c5.4xlarge
+    ConstraintDescription: Must be a valid EC2 instance type that supports Nitro Enclaves
+
+  SSHLocation:
+    Description: The IP address range that can be used to SSH to the EC2 instances
+    Type: String
+    MinLength: 9
+    MaxLength: 18
+    Default: 0.0.0.0/0
+    AllowedPattern: (\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})/(\d{1,2})
+    ConstraintDescription: Must be a valid IP CIDR range of the form x.x.x.x/x
+
+Resources:
+  # Get default VPC
+  DefaultVPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 172.31.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      InstanceTenancy: default
+      Tags:
+        - Key: Name
+          Value: Default VPC
+
+  # Get default subnet in the first availability zone
+  DefaultSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref DefaultVPC
+      AvailabilityZone: !Select [0, !GetAZs '']
+      CidrBlock: 172.31.0.0/20
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: Default Subnet
+
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Enable SSH access
+      VpcId: !Ref DefaultVPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SSHLocation
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId
+      SubnetId: !Ref DefaultSubnet
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 50
+            VolumeType: gp3
+            DeleteOnTermination: true
+      ImageId: !FindInMap [RegionMap, !Ref 'AWS::Region', AMI]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          
+          # Update system packages
+          dnf update -y
+          
+          # Install Nitro Enclaves CLI and dependencies
+          dnf install -y aws-nitro-enclaves-cli aws-nitro-enclaves-cli-devel
+          
+          # Install Docker (required for Nitro Enclaves)
+          dnf install -y docker
+          systemctl start docker
+          systemctl enable docker
+          
+          # Add ec2-user to docker and ne groups
+          usermod -aG docker ec2-user
+          usermod -aG ne ec2-user
+          
+          # Configure Nitro Enclaves allocator to pre-allocate resources
+          # Allocate 4 vCPUs and 8GB of memory for enclaves
+          mkdir -p /etc/nitro_enclaves/
+          cat > /etc/nitro_enclaves/allocator.yaml << 'EOF'
+          ---
+          # Nitro Enclaves allocator configuration
+          memory_mib: 8192
+          cpu_count: 4
+          # Keep enclave memory allocation enabled
+          enclave_cpu_count: 4
+          enclave_memory_mib: 8192
+          EOF
+          
+          # Start and enable the Nitro Enclaves allocator service
+          systemctl start nitro-enclaves-allocator.service
+          systemctl enable nitro-enclaves-allocator.service
+          
+          # Install MySQL client
+          dnf install -y mysql
+          
+          # Install Python3 and pip (already included in AL2023)
+          dnf install -y python3-pip
+          
+          # Install additional packages
+          dnf install -y \
+              aws-cli \
+              gcc \
+              gcc-c++ \
+              make \
+              openssl-devel \
+              libffi-devel \
+              wget \
+              iproute \
+              tar \
+              gzip \
+              bzip2-devel \
+              openssh-server \
+              unzip \
+              sed \
+              jq
+          
+          # Install PostgreSQL 15
+          dnf install -y postgresql15 postgresql15-server postgresql15-devel
+          
+          # Clean dnf cache
+          dnf clean all
+          
+          # Install Python packages
+          pip3 install boto3
+          pip3 install pybase64
+          pip3 install requests
+          pip3 install python_http_client
+          pip3 install psycopg2-binary
+          
+          # Verify the Nitro Enclaves installation
+          nitro-cli --version
+          
+          # Generate a new SSH key for ec2-user
+          mkdir -p /home/ec2-user/.ssh
+          ssh-keygen -t rsa -f /home/ec2-user/.ssh/id_rsa -N ""
+          cat /home/ec2-user/.ssh/id_rsa.pub >> /home/ec2-user/.ssh/authorized_keys
+          chmod 600 /home/ec2-user/.ssh/authorized_keys
+          chmod 600 /home/ec2-user/.ssh/id_rsa
+          chown -R ec2-user:ec2-user /home/ec2-user/.ssh
+          
+          # Signal CloudFormation that the setup is complete
+          /usr/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region}
+
+      Tags:
+        - Key: Name
+          Value: NitroEnclaveAL2023Instance
+
+  # IAM Role for EC2 instance to access AWS services
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref EC2InstanceRole
+
+Mappings:
+  RegionMap:
+    us-east-1:
+      AMI: ami-0a3c3a20c09d6f377  # Amazon Linux 2023 AMI in us-east-1
+    us-east-2:
+      AMI: ami-0a48719e6b9e9df40  # Amazon Linux 2023 AMI in us-east-2
+    us-west-1:
+      AMI: ami-0a0a567fd5c6c2191  # Amazon Linux 2023 AMI in us-west-1
+    us-west-2:
+      AMI: ami-0b9edd5c39a7a3173  # Amazon Linux 2023 AMI in us-west-2
+    eu-west-1:
+      AMI: ami-0a1f4febc8b9ab8b1  # Amazon Linux 2023 AMI in eu-west-1
+    eu-central-1:
+      AMI: ami-0e2031728ef69a466  # Amazon Linux 2023 AMI in eu-central-1
+    ap-northeast-1:
+      AMI: ami-0de5311b2a443fb89  # Amazon Linux 2023 AMI in ap-northeast-1
+    ap-southeast-1:
+      AMI: ami-0dc5785603ad4ff54  # Amazon Linux 2023 AMI in ap-southeast-1
+    ap-southeast-2:
+      AMI: ami-0c5d61202c3b9c33e  # Amazon Linux 2023 AMI in ap-southeast-2
+
+Outputs:
+  InstanceId:
+    Description: ID of the EC2 instance
+    Value: !Ref EC2Instance
+
+  PublicDNS:
+    Description: Public DNS name of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicDnsName
+
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+    
+  SSHInstructions:
+    Description: Instructions for connecting to the instance using SSM
+    Value: !Sub |
+      To connect to your instance using AWS Systems Manager Session Manager:
+      1. Install the AWS CLI and Session Manager plugin
+      2. Run: aws ssm start-session --target ${EC2Instance} --region ${AWS::Region}
